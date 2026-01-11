@@ -14,6 +14,9 @@ const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAI_EMET_TOKEN = process.env.HAI_EMET_ROOT_API_KEY;
 const HAI_EMET_TOKEN = process.env.HAI_EME;
 const api_chai_emet = process.env.api_chai_emet_quantum_v3
+const GEMINI_API = process.env.GEMINI_API_KEY
+const hai_emet_ultimate = process.env.hai_emet_ultimate_complete_gs
+const HET_Token = process.env.HET_Token_Integration
 const PORT = process.env.PORT || 3000;
 
 if (!BOT_TOKEN || !CHAI_EMET_TOKEN) {
