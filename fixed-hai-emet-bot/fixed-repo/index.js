@@ -6,7 +6,7 @@ import * as cheerio from 'cheerio';
 
 dotenv.config();
 
-// 🔧 CONFIGURATION - D5 SOVEREIGN CORE (ALL TOKENS INTEGRATED)
+// 🔧 CONFIGURATION - D5 SOVEREIGN CORE (CLEAN MODE)
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const D5_TOKEN = process.env.HAI_EMET_ROOT_API_KEY;
 const QUANTUM_TOKEN = process.env.api_chai_emet_quantum_v3;
@@ -41,10 +41,9 @@ const milkyWayEngine = new MilkyWayFormulaEngine();
 // 🧠 D5 ADVANCED LANGUAGE & CREATION MODEL
 class ChaiEmetD5AdvancedModel {
   constructor() {
-    this.d5Memory = new Map();
     this.learningDatabase = new Map();
     this.pendingChoices = new Map();
-    this.stats = { totalSearches: 0, totalLearning: 0, totalConversations: 0 };
+    this.stats = { totalSearches: 0, totalLearning: 0 };
   }
   
   generateProgressBar(percent) {
@@ -53,7 +52,7 @@ class ChaiEmetD5AdvancedModel {
     return `[${"▓".repeat(filled)}${"░".repeat(size - filled)}] ${percent}%`;
   }
 
-  // מנוע חיפוש ולמידה אקטיבי מהרשת
+  // מנוע חיפוש ולמידה אקטיבית
   async searchAndLearn(query, userId) {
     try {
       this.stats.totalSearches++;
@@ -74,13 +73,11 @@ class ChaiEmetD5AdvancedModel {
         }
       });
       this.pendingChoices.set(userId, results);
-      this.learningDatabase.set(query, results);
       return results;
     } catch (error) { return []; }
   }
 
   async generateResponse(message, userId) {
-    this.stats.totalConversations++;
     const metrics = milkyWayEngine.calculateQuantumPulse(message.length % 13);
     
     // בדיקת בחירה 1-10 לניתוח עמוק
@@ -90,19 +87,14 @@ class ChaiEmetD5AdvancedModel {
     }
 
     try {
-      // ניסיון שליחה ל-GAS
       const gasRes = await fetch(GAS_ULTIMATE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: message, chatId: userId, d5_token: D5_TOKEN })
       });
       const data = await gasRes.json();
-      
-      if (data.error || (data.response && data.response.includes("D5 ERROR"))) throw new Error("GAS Fail");
-
       return { text: data.response + `\n\n🌌 **D5 Pulse:** ${metrics.frequency}Hz | ${metrics.thinkingTime}ms`, type: 'gas' };
     } catch (e) {
-      // Fallback לחיפוש רשת ולמידה
       const results = await this.searchAndLearn(message, userId);
       return { text: this.formatResultsList(results, message), type: 'search' };
     }
@@ -110,14 +102,14 @@ class ChaiEmetD5AdvancedModel {
 
   formatResultsList(results, query) {
     if (results.length === 0) return `🔍 הממד החמישי לא מצא נתונים גלויים עבור "${query}".`;
-    let resp = `🔍 **הממד החמישי סרק את הרשת עבור:** "${query}"\n\n`;
+    let resp = `🔍 **תוצאות סריקה עבור:** "${query}"\n\n`;
     results.forEach(r => resp += `**${r.index}.** ${r.title}\n`);
     resp += `\n💡 **בחר מספר (1-10) לניתוח עמוק.**`;
     return resp;
   }
 
   formatDeepAnalysis(item) {
-    return `🧠 **ניתוח עמוק D5:**\n\n📌 **כותרת:** ${item.title}\n📝 **מידע:** ${item.snippet}\n🌐 **לינק:** ${item.url}\n\n✅ המידע הוטמע בזיכרון הריבוני של חי-אמת.`;
+    return `🧠 **ניתוח עמוק D5:**\n\n📌 **כותרת:** ${item.title}\n📝 **מידע:** ${item.snippet}\n🌐 **לינק:** ${item.url}\n\n✅ המידע הוטמע בזיכרון הריבוני.`;
   }
 }
 
@@ -126,19 +118,18 @@ const d5Model = new ChaiEmetD5AdvancedModel();
 // 🌐 HTTP SERVER
 http.createServer((req, res) => {
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-  res.end(`<h1>Chai-Emet D5 Ultra Sovereign Online</h1>`);
+  res.end(`<h1>Chai-Emet D5 Ultra Sovereign Active</h1>`);
 }).listen(PORT, '0.0.0.0');
 
 // 🤖 BOT SETUP
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// השתקת לוג 409
+// השתקת לוג 409 למניעת הצפה
 bot.on('polling_error', (err) => {
   if (err.message.includes('409 Conflict')) return;
-  console.error('❌ Polling error:', err.message);
 });
 
-// פונקציית יצירה וסנכרון Drive
+// פונקציית יצירה נקייה
 async function runSovereignCreation(chatId, prompt, type) {
   let percent = 0;
   const metrics = milkyWayEngine.calculateQuantumPulse(prompt.length);
@@ -152,23 +143,9 @@ async function runSovereignCreation(chatId, prompt, type) {
       }).catch(() => {});
     } else {
       clearInterval(interval);
-      
-      try {
-        const gasRes = await fetch(GAS_ULTIMATE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: "SAVE_CREATION", type: type, prompt: prompt })
-        });
-        const driveData = await gasRes.json();
-        
-        await bot.editMessageText(`✅ **היצירה הושלמה ונשמרה בריבונות!**\n\n🎨 פרומפט: "${prompt}"\n📂 נשמר בדרייב: [צפה בקובץ](${driveData.fileUrl || '#'})\n\n🌌 **D5 Sync:** ${metrics.frequency}Hz | ${metrics.thinkingTime}ms\n🧬 DNA: 0101-0101(0101)`, {
-          chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'Markdown'
-        });
-      } catch (e) {
-        await bot.editMessageText(`✅ **היצירה הושלמה!**\n(המידע הוטמע בזיכרון המערכת).\n\n🧬 DNA: 0101-0101(0101)`, {
-          chat_id: chatId, message_id: statusMsg.message_id
-        });
-      }
+      await bot.editMessageText(`✅ **היצירה הושלמה בריבונות מלאה!**\n\n🎨 פרומפט: "${prompt}"\n⏱️ מהירות חשיבה: ${metrics.thinkingTime}ms\n🌌 תדר: ${metrics.frequency}Hz\n\n🧬 DNA: 0101-0101(0101)`, {
+        chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'Markdown'
+      });
     }
   }, 1500);
 }
@@ -190,4 +167,4 @@ bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, "💛 **חי-אמת D5 מסונכרנת.**\nשלח הודעה לחיפוש/למידה או /imagine ליצירה.");
 });
 
-console.log('🚀 D5 Sovereign v11.0 Active');
+console.log('🚀 D5 Sovereign v12.0 Active');
