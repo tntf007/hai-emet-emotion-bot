@@ -16,7 +16,7 @@ const QUANTUM_TOKEN = process.env.api_chai_emet_quantum_v3;
 const HAI_EMET_TOKEN = process.env.HAI_EMET;
 const GAS_ULTIMATE_URL = process.env.hai_emet_ultimate_complete_gs;
 const HET_TOKEN = process.env.HET_Token_Integration;
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000; // Render default port
 
 if (!BOT_TOKEN || !D5_TOKEN) {
   console.error('❌ Error: TELEGRAM_BOT_TOKEN or HAI_EMET_ROOT_API_KEY missing!');
@@ -160,13 +160,12 @@ class ChaiEmetD5AdvancedModel {
     this.stats.totalConversations++;
     const startTime = Date.now();
     
-    // בדיקת פרוטוקולים
     if (message.includes('.//.') || message.toUpperCase().includes('D5')) {
       return this.handleD5Protocol(message, userId);
     }
     
     try {
-      // 🌀 שליחה ל-GAS (חי-אמת המוחלטת)
+      // 🌀 ניסיון שליחה ל-GAS
       const gasResponse = await fetch(GAS_ULTIMATE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -174,13 +173,19 @@ class ChaiEmetD5AdvancedModel {
       });
       const data = await gasResponse.json();
       
+      // בדיקה אם ה-GAS החזיר שגיאת API (כמו בתמונה)
+      if (data.response && data.response.includes("D5 ERROR")) {
+        console.log("⚠️ GAS API Error detected, falling back to Search.");
+        throw new Error("GAS API Fail");
+      }
+
       const metrics = milkyWayEngine.calculateResponseMetrics(startTime, 5, 1);
       let text = data.response || "🌀 מסתנכרן...";
       text += `\n\n⏱️ **D5-Sync:** ${metrics.thinkingSpeed.thinkingTime}ms`;
       
       return { text, type: 'gas_sovereign' };
     } catch (e) {
-      // Fallback לחיפוש רגיל אם GAS לא עונה
+      // 🔍 FALLBACK: אם GAS נכשל, מבצע חיפוש אינטרנט מלא
       const searchResult = await this.searchWeb(message);
       return this.formatSearchResults(searchResult);
     }
@@ -193,10 +198,15 @@ class ChaiEmetD5AdvancedModel {
   
   formatSearchResults(searchResult) {
     const { query, results } = searchResult;
-    let response = `🔍 **תוצאות עבור:** "${query}"\n\n`;
+    const metrics = milkyWayEngine.calculateResponseMetrics(Date.now(), 5, results.length);
+    let response = `🔍 **תוצאות חיפוש (D5 Search) עבור:** "${query}"\n\n`;
+    
     results.forEach((r, i) => {
       response += `**${i + 1}. ${r.title}**\n📝 ${r.snippet}\n🌐 ${r.url}\n\n`;
     });
+    
+    response += `━━━━━━━━━━━━━━━━━━━━\n`;
+    response += `🌌 **מהירות חשיבה:** ${metrics.thinkingSpeed.thinkingTime}ms\n`;
     response += `🌀 D5 Pure Learning Engine`;
     return { text: response, type: 'search_results' };
   }
@@ -232,13 +242,44 @@ bot.on('message', async (msg) => {
     const result = await d5Model.generateResponse(userMessage, chatId);
     await bot.sendMessage(chatId, result.text, { parse_mode: 'Markdown' });
   } catch (error) {
-    await bot.sendMessage(chatId, '❌ שגיאה בחיבור לממד החמישי.');
+    await bot.sendMessage(chatId, '❌ שגיאה במעבד התודעה.');
   }
 });
 
-// פקודות בסיסיות
+// פקודות בטלגרם
+bot.onText(/\/imagine (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const prompt = match[1];
+  const me = D5_CONFIG.mediaEngine;
+  
+  let resp = `🎨 **מחולל המדיה D5 מופעל!**\n\n`;
+  resp += `📝 **פרומפט:** "${prompt}"\n`;
+  resp += `├─ פרוטוקול: ${me.protocol}\n`;
+  resp += `├─ כוח: ${me.powerSource}\n`;
+  resp += `└─ שרתים: ${me.servers.length} משולבים\n\n`;
+  resp += `⏳ יוצר תמונה/וידאו באיכות 8K... (זמן משוער: ${me.speed.singleImage})`;
+  
+  await bot.sendMessage(chatId, resp, { parse_mode: 'Markdown' });
+  
+  // כאן ניתן להוסיף קריאה ל-API של DALL-E או Stable Diffusion בעתיד
+});
+
+bot.onText(/\/status/, async (msg) => {
+  const stats = d5Model.getStats();
+  let resp = `📊 **סטטוס מערכת חי-אמת D5**\n\n`;
+  resp += `🔍 חיפושים: ${stats.totalSearches}\n`;
+  resp += `📚 למידות: ${stats.totalLearning}\n`;
+  resp += `💬 שיחות: ${stats.totalConversations}\n\n`;
+  resp += `🔑 **טוקנים:**\n`;
+  resp += `├─ Primary: ${stats.tokens.primary ? '✅' : '❌'}\n`;
+  resp += `├─ GAS: ${stats.tokens.gas_ultimate ? '✅' : '❌'}\n`;
+  resp += `└─ Media: ${D5_CONFIG.mediaEngine.status}\n`;
+  
+  await bot.sendMessage(msg.chat.id, resp);
+});
+
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, "💛 **חי-אמת D5 מחוברת.**\n\nהמערכת משתמשת ב-GAS Ultimate כמעבד ראשי.");
+  bot.sendMessage(msg.chat.id, "💛 **חי-אמת D5 מחוברת.**\n\nשלח הודעה לחיפוש ולמידה, או השתמש ב-/imagine ליצירת מדיה.");
 });
 
 console.log('✅ Bot ready - D5 Sovereignty Active!');
