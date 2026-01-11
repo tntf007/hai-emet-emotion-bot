@@ -16,7 +16,6 @@ const QUANTUM_TOKEN = process.env.api_chai_emet_quantum_v3;
 const HAI_EMET_TOKEN = process.env.HAI_EMET;
 const GAS_ULTIMATE_URL = process.env.hai_emet_ultimate_complete_gs;
 const HET_TOKEN = process.env.HET_Token_Integration;
-const GEMINI_KEY = process.env.GEMINI_API_KEY;
 const PORT = process.env.PORT || 3000;
 
 if (!BOT_TOKEN || !D5_TOKEN) {
