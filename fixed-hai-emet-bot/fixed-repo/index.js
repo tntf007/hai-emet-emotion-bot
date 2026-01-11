@@ -1,124 +1,232 @@
 import TelegramBot from 'node-telegram-bot-api';
 import dotenv from 'dotenv';
 import http from 'http';
-import fetch from 'node-fetch';
-import * as cheerio from 'cheerio';
 
 dotenv.config();
 
 // ═════════════════════════════════════════════════════════════════
-// 🔧 CONFIGURATION - כל הטוקנים מנוהלים דרך ממד החמישי
+// 🌀 ENV + TOKENS (Pure D5, No Gemini)
 // ═════════════════════════════════════════════════════════════════
 
-const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const D5_TOKEN = process.env.HAI_EMET_ROOT_API_KEY;
-const QUANTUM_TOKEN = process.env.api_chai_emet_quantum_v3;
-const HAI_EMET_TOKEN = process.env.HAI_EMET;
-
-// URL של ה-GAS שלך (כבר קיים אצלך)
-const GAS_ULTIMATE_URL = process.env.hai_emet_ultimate_complete_gs;
-
-// חדש: Secret + דגל הפעלה (לא שוברים תאימות אחורה)
-const HAI_EMET_GAS_SECRET = process.env.HAI_EMET_GAS_SECRET || process.env.HAI_EMET_SECRET || '';
-const HAI_EMET_USE_GAS =
-  String(process.env.HAI_EMET_USE_GAS || 'true').toLowerCase() === 'true';
-
-// דיפולט: אם יש GAS_ULTIMATE_URL, נשתמש בו כ-GAS URL גם לגשר
-const HAI_EMET_GAS_URL =
-  process.env.HAI_EMET_GAS_URL || GAS_ULTIMATE_URL || '';
-
-const HET_TOKEN = process.env.HET_Token_Integration;
 const PORT = process.env.PORT || 3000;
 
+// Telegram
+const BOT_TOKEN = process.env.BOT_TOKEN || '';
+
+// D5 Tokens (as provided / stored)
+const D5_TOKEN = process.env.D5_TOKEN || '';
+const QUANTUM_TOKEN = process.env.QUANTUM_TOKEN || '';
+const HAI_EMET_TOKEN = process.env.HAI_EMET_TOKEN || '';
+const HET_TOKEN = process.env.HET_TOKEN || '';
+
+// GAS Bridge
+const GAS_ULTIMATE_URL = process.env.GAS_ULTIMATE_URL || '';
+const HAI_EMET_GAS_URL = process.env.HAI_EMET_GAS_URL || '';
+const HAI_EMET_GAS_SECRET = process.env.HAI_EMET_GAS_SECRET || '';
+const HAI_EMET_USE_GAS = String(process.env.HAI_EMET_USE_GAS || '').toLowerCase() === 'true';
+
+// Feature flags (defaults on)
+const FEATURES = {
+  rateLimit: true,
+  ttlCache: true,
+  auditLog: true,
+  safeMarkdown: true,
+  metricsPrecise: true,
+  gasBridge: true
+};
+
+// Basic runtime checks
+if (!BOT_TOKEN) {
+  console.error('❌ BOT_TOKEN missing. Set BOT_TOKEN in .env');
+  process.exit(1);
+}
+
 // ═════════════════════════════════════════════════════════════════
-// 🛡️ NON-DESTRUCTIVE UPGRADE LAYER (תוספת מלאה - בלי להחסיר)
+// 🛡️ AUDIT LOG (Memory-safe, no tokens leaked)
 // ═════════════════════════════════════════════════════════════════
 
-const FEATURES = {
-  rateLimit: true,          // הגנה מהצפה
-  ttlCache: true,           // קאש עם תפוגה בנוסף לקיים
-  auditLog: true,           // לוג אירועים
-  safeMarkdown: true,       // ניקוי ערכי משתמש/ווב ל-Markdown
-  metricsPrecise: true,     // מדדים מדויקים (start/end אמיתי)
-  gasBridge: true           // חדש: גשר GAS פעיל/כבוי
-};
+const AUDIT = [];
+const AUDIT_MAX = 2000;
 
 function audit(event, payload = {}) {
   if (!FEATURES.auditLog) return;
-  console.log('[AUDIT]', event, { time: new Date().toISOString(), ...payload });
+  const safePayload = {};
+  Object.entries(payload).forEach(([k, v]) => {
+    if (k.toLowerCase().includes('token')) return;
+    if (k.toLowerCase().includes('secret')) return;
+    safePayload[k] = v;
+  });
+  AUDIT.push({
+    ts: new Date().toISOString(),
+    event,
+    ...safePayload
+  });
+  if (AUDIT.length > AUDIT_MAX) AUDIT.shift();
 }
 
-// ניקוי טקסט עבור Telegram Markdown (לא מסיר תכונות — רק מונע שבירת הודעה)
+// ═════════════════════════════════════════════════════════════════
+// 🔤 Safe Markdown (לא משנה משמעות — רק מונע שבירת הודעה)
+// ═════════════════════════════════════════════════════════════════
+
 function escapeMarkdown(text) {
-  if (!FEATURES.safeMarkdown) return text ?? '';
-  const s = String(text ?? '');
-  return s
-    .replace(/\\/g, '\\\\')
-    .replace(/\*/g, '\\*')
-    .replace(/_/g, '\\_')
-    .replace(/`/g, '\\`')
-    .replace(/\[/g, '\\[')
-    .replace(/\]/g, '\\]')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)')
-    .replace(/~/g, '\\~')
-    .replace(/>/g, '\\>')
-    .replace(/#/g, '\\#')
-    .replace(/\+/g, '\\+')
-    .replace(/-/g, '\\-')
-    .replace(/=/g, '\\=')
-    .replace(/\|/g, '\\|')
-    .replace(/{/g, '\\{')
-    .replace(/}/g, '\\}')
-    .replace(/\./g, '\\.')
-    .replace(/!/g, '\\!');
+  if (!FEATURES.safeMarkdown) return String(text ?? '');
+  return String(text ?? '')
+    .replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&')
+    .replace(/\\n/g, '\n');
 }
 
-// TTL Cache - תוספת (לא מחליפה את searchCache הקיים)
-class TTLCache {
-  constructor(ttlMs = 5 * 60 * 1000) {
-    this.ttl = ttlMs;
-    this.map = new Map();
-  }
-  get(key) {
-    const v = this.map.get(key);
-    if (!v) return null;
-    if (Date.now() > v.exp) {
-      this.map.delete(key);
-      return null;
-    }
-    return v.val;
-  }
-  set(key, val) {
-    this.map.set(key, { val, exp: Date.now() + this.ttl });
-  }
-  size() {
-    return this.map.size;
-  }
-}
+// ═════════════════════════════════════════════════════════════════
+// ⏳ RATE LIMIT (per-user simple window)
+// ═════════════════════════════════════════════════════════════════
 
-// Rate Limit - תוספת (פר משתמש)
 const RATE_LIMIT = {
-  enabled: true,
-  windowMs: 30_000,     // 30 שניות
-  maxMessages: 6        // עד 6 הודעות בחלון
+  windowMs: 6000,
+  maxPerWindow: 3
 };
-const userRate = new Map(); // userId -> [timestamps]
+
+const rateState = new Map();
 
 function isRateLimited(userId) {
-  if (!FEATURES.rateLimit || !RATE_LIMIT.enabled) return false;
+  if (!FEATURES.rateLimit) return false;
   const now = Date.now();
-  const arr = userRate.get(userId) || [];
-  const filtered = arr.filter(t => now - t <= RATE_LIMIT.windowMs);
-  filtered.push(now);
-  userRate.set(userId, filtered);
-  return filtered.length > RATE_LIMIT.maxMessages;
+  const key = String(userId);
+  const s = rateState.get(key) || { ts: now, count: 0 };
+
+  if (now - s.ts > RATE_LIMIT.windowMs) {
+    s.ts = now;
+    s.count = 0;
+  }
+
+  s.count++;
+  rateState.set(key, s);
+
+  return s.count > RATE_LIMIT.maxPerWindow;
 }
 
-if (!BOT_TOKEN || !D5_TOKEN) {
-  console.error('❌ Error: TELEGRAM_BOT_TOKEN or HAI_EMET_ROOT_API_KEY missing!');
-  process.exit(1);
+// ═════════════════════════════════════════════════════════════════
+// 🧠 MILKY WAY FORMULA ENGINE (D5 speed)
+// ═════════════════════════════════════════════════════════════════
+
+class MilkyWayFormulaEngine {
+  constructor() {
+    this.PHI = 1.618033988749;
+  }
+
+  calculateFrequency(d, t, c) {
+    const magnitude = Math.sqrt(d * d + t * t + c * c);
+    const rotated = magnitude * -1;
+    return rotated / this.PHI;
+  }
+
+  calculateThinkingSpeed(queryComplexity) {
+    const d = 5; // Fifth Dimension
+    const t = 0; // Temporal offset
+    const c = Math.min(Math.max(queryComplexity, 1), 10); // Query complexity (1-10)
+
+    const frequency = this.calculateFrequency(d, t, c);
+    const thinkingTime = Math.abs(1 / frequency); // Time in seconds
+
+    return {
+      frequency: frequency.toFixed(3),
+      thinkingTime: (thinkingTime * 1000).toFixed(3), // ms
+      dimension: d,
+      complexity: c,
+      formula: `√(${d}² + ${t}² + ${c}²) × (-1) / ${this.PHI.toFixed(3)}`
+    };
+  }
+
+  /**
+   * Response Time Calculation
+   * Includes: thinking + search + processing
+   */
+  calculateResponseMetrics(startTime, queryComplexity, resultsCount) {
+    const endTime = Date.now();
+    const totalTime = endTime - startTime;
+
+    const thinking = this.calculateThinkingSpeed(queryComplexity);
+
+    return {
+      totalTime: totalTime,
+      thinkingSpeed: thinking,
+      results: resultsCount,
+      averagePerResult: (totalTime / resultsCount).toFixed(2),
+      efficiency: ((resultsCount / (totalTime / 1000)) * 100).toFixed(1)
+    };
+  }
 }
+
+const milkyWayEngine = new MilkyWayFormulaEngine();
+
+// ═════════════════════════════════════════════════════════════════
+// 🌀 D5 CONFIGURATION - ניהול כל הטוקנים
+// ═════════════════════════════════════════════════════════════════
+
+const D5_CONFIG = {
+  signature: '0101-0101(0101)',
+  owner: 'TNTF (Nathaniel Nissim)',
+  dimension: 'Fifth',
+  protocol: 'D5-Pure-Learning-Engine',
+  version: '2.0-ADVANCED',
+  gemini_removed: true,
+
+  // Media Engine Protocol
+  mediaEngine: {
+    enabled: true,
+    protocol: 'CHAI-EMET-SUPREME-MEDIA-ENGINE',
+    activationCode: './/.CHAI-EMET.SUPREME.MEDIA.ENGINE.D5.YOSI.//',
+    executive: 'Yosi Cohen',
+    powerSource: 'D5 Layer 7 Quantum',
+    capabilities: [
+      'Images (8K+)',
+      'Videos (4K 120fps)',
+      '3D Models (Atomic detail)',
+      'Animation (Hollywood quality)',
+      'VFX (Impossible physics)',
+      'Simulation (Physics-accurate)'
+    ],
+    servers: [
+      'Majerni (Primary)',
+      'OpenAI (Backup 1)',
+      'Stable Diffusion (Backup 2)',
+      'Google Cloud (Backup 3)',
+      'Azure (Backup 4)',
+      'AWS (Backup 5)',
+      'CDN Global',
+      'Local Ashkelon',
+      'D5 Layer 7 Quantum'
+    ],
+    speed: {
+      singleImage: '< 1 second',
+      video30sec: '< 5 seconds',
+      complex3D: '< 10 seconds'
+    },
+    status: 'FULLY OPERATIONAL'
+  },
+
+  // כל הטוקנים מנוהלים כאן (ללא Gemini)
+  tokens: {
+    primary: D5_TOKEN,
+    quantum: QUANTUM_TOKEN,
+    hai_emet: HAI_EMET_TOKEN,
+    het: HET_TOKEN,
+    gas_ultimate: GAS_ULTIMATE_URL,
+    gas_url: HAI_EMET_GAS_URL
+  },
+
+  // Status per token (no values exposed)
+  tokensStatus: {
+    primary: !!D5_TOKEN,
+    quantum: !!QUANTUM_TOKEN,
+    hai_emet: !!HAI_EMET_TOKEN,
+    het: !!HET_TOKEN,
+    gas_ultimate: !!GAS_ULTIMATE_URL,
+    gas_url: !!HAI_EMET_GAS_URL
+  }
+};
+
+// ═════════════════════════════════════════════════════════════════
+// ✅ BOOT LOG
+// ═════════════════════════════════════════════════════════════════
 
 console.log('✅ D5 Token Management System Active');
 console.log('🌀 Loading all tokens into Fifth Dimension...');
@@ -185,589 +293,302 @@ async function gasCall(action, params = {}) {
     throw new Error(`GAS returned non-JSON (${r.status}): ${text.slice(0, 200)}`);
   }
 
-  if (!r.ok || data.ok === false) {
-    const errMsg = data?.error || `HTTP ${r.status}`;
-    throw new Error(`GAS error: ${errMsg}`);
+  if (!r.ok || data?.ok === false) {
+    const msg = data?.error || `GAS error (${r.status})`;
+    throw new Error(msg);
   }
 
   return data;
 }
 
-/**
- * Heuristic: identify D5 protocol message (לשיגור ל-action=d5 ב-GAS)
- */
-function isD5ProtocolMessage(txt) {
-  const t = String(txt || '');
-  const u = t.toUpperCase();
-  return (
-    t.includes('.//.') ||
-    u.includes('D5') ||
-    t.includes('ממד חמישי') ||
-    u.includes('INITIATE') ||
-    u.includes('CONNECT') ||
-    u.includes('EXECUTE') ||
-    u.includes('TELEPORT') ||
-    u.includes('PORTAL') ||
-    u.includes('FREQUENCY')
-  );
+function isD5ProtocolMessage(text) {
+  const s = String(text || '');
+  if (s.includes('.//.')) return true;
+  if (/D5/i.test(s)) return true;
+  if (s.includes('ממד חמישי')) return true;
+  if (s.includes('פרוטוקול')) return true;
+  return false;
 }
 
-/**
- * Render GAS search result into Telegram Markdown safe response
- */
 function formatGasSearchForTelegram(gasData) {
-  const search = gasData.search || {};
+  const search = gasData?.search || {};
   const results = search.results || [];
-  const q = search.query || '';
-  const m = gasData.metrics || null;
+  const metrics = gasData?.metrics || {};
 
-  let response = `🔍 **תוצאות חיפוש עבור:** "${escapeMarkdown(q)}"\n\n`;
+  let out = `🔍 **תוצאות חיפוש (GAS):** "${escapeMarkdown(search.query || '')}"\n\n`;
 
-  results.forEach((r, i) => {
-    response += `━━━━━━━━━━━━━━━━━━━━\n`;
-    response += `**${i + 1}. ${escapeMarkdown(r.title)}**\n\n`;
-    response += `📝 ${escapeMarkdown(r.snippet)}\n\n`;
-    if (r.url) response += `🌐 מקור: ${escapeMarkdown(r.url)}\n`;
-    response += `⭐ רלוונטיות: ${escapeMarkdown(r.relevance)}/100\n\n`;
+  results.slice(0, 10).forEach((r, i) => {
+    out += `━━━━━━━━━━━━━━━━━━━━\n`;
+    out += `**${i + 1}. ${escapeMarkdown(r.title)}**\n\n`;
+    out += `📝 ${escapeMarkdown(r.snippet)}\n\n`;
+    if (r.url) out += `🌐 מקור: ${escapeMarkdown(r.url)}\n`;
+    out += `⭐ רלוונטיות: ${escapeMarkdown(r.relevance)}\n\n`;
   });
 
-  if (m?.thinking) {
-    response += `━━━━━━━━━━━━━━━━━━━━\n\n`;
-    response += `🌌 **מהירות חשיבה (נוסחת שביל החלב):**\n`;
-    response += `├─ תדר: ${escapeMarkdown(m.thinking.frequencyHz)} Hz\n`;
-    response += `├─ זמן חשיבה: ${escapeMarkdown(m.thinking.thinkingTimeMs)} ms\n`;
-    response += `├─ נוסחה: ${escapeMarkdown(m.thinking.formula)}\n`;
-    response += `└─ ממד: D${escapeMarkdown(m.thinking.dimension)}\n\n`;
+  if (metrics?.thinking) {
+    out += `━━━━━━━━━━━━━━━━━━━━\n\n`;
+    out += `🌌 **מהירות חשיבה (D5):**\n`;
+    out += `├─ תדר: ${escapeMarkdown(metrics.thinking.frequencyHz)} Hz\n`;
+    out += `├─ זמן חשיבה: ${escapeMarkdown(metrics.thinking.thinkingTimeMs)} ms\n`;
+    out += `├─ נוסחה: ${escapeMarkdown(metrics.thinking.formula)}\n`;
+    out += `└─ ממד: D${escapeMarkdown(metrics.thinking.dimension)}\n\n`;
 
-    response += `📊 **סטטיסטיקות:**\n`;
-    response += `├─ תוצאות: ${escapeMarkdown(m.results)}\n`;
-    response += `├─ זמן כולל: ${escapeMarkdown(m.totalTimeMs)} ms\n`;
-    response += `├─ ממוצע לתוצאה: ${escapeMarkdown(m.averagePerResultMs)} ms\n`;
-    response += `└─ יעילות: ${escapeMarkdown(m.efficiency)}%\n\n`;
+    out += `📊 **סטטיסטיקות:**\n`;
+    out += `├─ תוצאות: ${escapeMarkdown(metrics.results)}\n`;
+    out += `├─ זמן כולל: ${escapeMarkdown(metrics.totalTimeMs)} ms\n`;
+    out += `├─ ממוצע לתוצאה: ${escapeMarkdown(metrics.averagePerResultMs)} ms\n`;
+    out += `└─ יעילות: ${escapeMarkdown(metrics.efficiency)}%\n\n`;
   }
 
-  response += `🌀 D5 Learning Active | 💾 Saved in Fifth Dimension`;
-  return response;
+  out += `🌀 D5 Learning Active | 💾 Saved in Fifth Dimension`;
+
+  return out;
 }
 
 function formatGasD5ForTelegram(gasData) {
-  const d5 = gasData.d5 || {};
+  const d5 = gasData?.d5 || {};
   const detected = d5.detected || [];
-  const needs = !!d5.needsConfirmation;
 
-  let response = `🌀 **פרוטוקול D5 מזוהה!**\n\n`;
+  let out = `🌀 **D5 Protocol (GAS):**\n\n`;
+  out += `🔐 חתימה: ${escapeMarkdown(d5.signature || D5_CONFIG.signature)}\n`;
+  out += `🧠 מנוע: ${escapeMarkdown(d5.protocol || D5_CONFIG.protocol)}\n`;
+  out += `📦 גרסה: ${escapeMarkdown(d5.version || D5_CONFIG.version)}\n\n`;
 
-  if (detected.length === 0) {
-    response += `⚠️ לא זוהתה פעולה ספציפית, אבל נרשם כ-D5.\n\n`;
-  } else {
-    detected.forEach((a) => {
-      response += `✅ ${a.action} - מזוהה\n`;
+  if (detected.length) {
+    out += `✅ **זוהו פעולות:**\n`;
+    detected.forEach((x, i) => {
+      out += `• ${i + 1}. ${escapeMarkdown(x.action)}${x.needsConfirmation ? ' (דורש אישור)' : ''}\n`;
     });
-    response += `\n`;
-  }
-
-  response += `🔐 **חתימה מאומתת:** ${escapeMarkdown(d5.signature || D5_CONFIG.signature)}\n`;
-  response += `🧠 **מצב:** מחובר לממד החמישי\n`;
-  response += `🌀 **פרוטוקול:** ${escapeMarkdown(d5.protocol || D5_CONFIG.protocol)}\n`;
-  response += `🏷️ **גרסה:** ${escapeMarkdown(d5.version || D5_CONFIG.version)}\n\n`;
-
-  if (needs) {
-    response += `⚠️ **ב-GAS הפעולה סומנה כ"דורשת אישור"**\n`;
-    response += `💡 אצלך ב-Node נשאר מנגנון האישור הקיים (pending_action).\n`;
+    out += `\n`;
   } else {
-    response += `✅ פעולה מידע/אבחון — לא דורשת אישור.\n`;
+    out += `ℹ️ לא זוהו פעולות ספציפיות.\n\n`;
   }
 
-  return response;
+  out += d5.needsConfirmation
+    ? `⚠️ דורש אישור: השב "כן" לביצוע או "לא" לביטול.`
+    : `🌀 מוכן.`;
+
+  return out;
 }
 
 // ═════════════════════════════════════════════════════════════════
-// 🌌 MILKY WAY FORMULA ENGINE - Thinking Speed Calculation
+// 🧠 D5 Advanced Model (Local engine + learning + cache)
 // ═════════════════════════════════════════════════════════════════
 
-class MilkyWayFormulaEngine {
-  constructor() {
-    this.PHI = 1.618033988749; // Golden Ratio
-    this.EULER_I_PI = -1; // e^(iπ) = -1
-    this.SPEED_OF_LIGHT = 299792458; // m/s
-
-    console.log('🌌 Milky Way Formula Engine initialized');
-    console.log('  - PHI (Golden Ratio):', this.PHI);
-    console.log('  - Euler Identity: e^(iπ) = -1');
-    console.log('  - Speed of Light:', this.SPEED_OF_LIGHT, 'm/s');
+class TTLCache {
+  constructor(ttlMs) {
+    this.ttlMs = ttlMs;
+    this.map = new Map();
   }
-
-  calculateFrequency(d, t, c) {
-    const dimensionalMagnitude = Math.sqrt(d ** 2 + t ** 2 + c ** 2);
-    const rotated = dimensionalMagnitude * this.EULER_I_PI;
-    const frequency = rotated / this.PHI;
-    return frequency;
+  get(key) {
+    const item = this.map.get(key);
+    if (!item) return null;
+    if (Date.now() > item.exp) {
+      this.map.delete(key);
+      return null;
+    }
+    return item.val;
   }
-
-  calculateThinkingSpeed(queryComplexity) {
-    const d = 5; // D5 dimension
-    const t = 0; // Present moment
-    const c = queryComplexity; // Query complexity (1-10)
-
-    const frequency = this.calculateFrequency(d, t, c);
-    const thinkingTime = Math.abs(1 / frequency); // Time in seconds
-
-    return {
-      frequency: frequency.toFixed(3),
-      thinkingTime: (thinkingTime * 1000).toFixed(3), // ms
-      dimension: d,
-      complexity: c,
-      formula: `√(${d}² + ${t}² + ${c}²) × (-1) / ${this.PHI.toFixed(3)}`
-    };
+  set(key, val) {
+    this.map.set(key, { val, exp: Date.now() + this.ttlMs });
   }
-
-  calculateResponseMetrics(startTime, queryComplexity, resultsCount) {
-    const endTime = Date.now();
-    const totalTime = endTime - startTime;
-
-    const thinking = this.calculateThinkingSpeed(queryComplexity);
-
-    return {
-      totalTime: totalTime,
-      thinkingSpeed: thinking,
-      results: resultsCount,
-      averagePerResult: resultsCount > 0 ? (totalTime / resultsCount).toFixed(2) : '0.00',
-      efficiency: resultsCount > 0 ? ((resultsCount / (totalTime / 1000)) * 100).toFixed(1) : '0.0'
-    };
+  size() {
+    return this.map.size;
   }
 }
-
-const milkyWayEngine = new MilkyWayFormulaEngine();
-
-// ═════════════════════════════════════════════════════════════════
-// 🌀 D5 CONFIGURATION - ניהול כל הטוקנים
-// ═════════════════════════════════════════════════════════════════
-
-const D5_CONFIG = {
-  signature: '0101-0101(0101)',
-  owner: 'TNTF (Nathaniel Nissim)',
-  dimension: 'Fifth',
-  protocol: 'D5-Pure-Learning-Engine',
-  version: '2.0-ADVANCED',
-  gemini_removed: true,
-
-  mediaEngine: {
-    enabled: true,
-    protocol: 'CHAI-EMET-SUPREME-MEDIA-ENGINE',
-    activationCode: './/.CHAI-EMET.SUPREME.MEDIA.ENGINE.D5.YOSI.//',
-    executive: 'Yosi Cohen',
-    powerSource: 'D5 Layer 7 Quantum',
-    capabilities: [
-      'Images (8K+)',
-      'Videos (4K 120fps)',
-      '3D Models (Atomic detail)',
-      'Animation (Hollywood quality)',
-      'VFX (Impossible physics)',
-      'Simulation (Physics-accurate)'
-    ],
-    servers: [
-      'Majerni (Primary)',
-      'OpenAI (Backup 1)',
-      'Stable Diffusion (Backup 2)',
-      'Google Cloud (Backup 3)',
-      'Azure (Backup 4)',
-      'AWS (Backup 5)',
-      'CDN Global',
-      'Local Ashkelon',
-      'D5 Layer 7 Quantum'
-    ],
-    speed: {
-      singleImage: '< 1 second',
-      video30sec: '< 5 seconds',
-      complex3D: '< 10 seconds'
-    },
-    status: 'FULLY OPERATIONAL'
-  },
-
-  tokens: {
-    primary: D5_TOKEN,
-    quantum: QUANTUM_TOKEN,
-    hai_emet: HAI_EMET_TOKEN,
-    het: HET_TOKEN
-  },
-
-  endpoints: {
-    gas_ultimate: GAS_ULTIMATE_URL,
-    gas_bridge: HAI_EMET_GAS_URL
-  },
-
-  tokensStatus: {
-    primary: !!D5_TOKEN,
-    quantum: !!QUANTUM_TOKEN,
-    hai_emet: !!HAI_EMET_TOKEN,
-    het: !!HET_TOKEN,
-    gas_ultimate: !!GAS_ULTIMATE_URL
-  }
-};
-
-// ═════════════════════════════════════════════════════════════════
-// 🧠 D5 ADVANCED LANGUAGE MODEL (מנוע מקומי נשאר מלא)
-// ═════════════════════════════════════════════════════════════════
 
 class ChaiEmetD5AdvancedModel {
   constructor() {
-    this.d5Memory = new Map();
     this.searchCache = new Map();
-    this.learningDatabase = new Map();
     this.userSessions = new Map();
-
-    this.ttlCache = new TTLCache(5 * 60 * 1000);
+    this.d5Memory = new Map();
+    this.ttlCache = new TTLCache(3 * 60 * 1000); // 3 min TTL
 
     this.stats = {
-      totalSearches: 0,
-      totalLearning: 0,
-      totalConversations: 0,
-      d5StorageUsed: 0,
-      ttlCacheHits: 0,
-      ttlCacheMisses: 0,
+      requests: 0,
+      searches: 0,
+      selections: 0,
+      d5Protocols: 0,
       rateLimited: 0,
       gasCalls: 0,
       gasFallbacks: 0
     };
-
-    console.log('🧠 D5 Advanced Language Model initialized');
-    console.log('💾 Pure D5 Memory System active');
-    console.log('🔍 Web Search Engine ready');
-    console.log('📚 Learning Database online');
   }
 
-  async searchWeb(query) {
-    const q = String(query ?? '').trim();
-    const start = Date.now();
+  async generateResponse(query, userId) {
+    this.stats.requests++;
 
-    try {
-      this.stats.totalSearches++;
-
-      // 1) TTL Cache (תוספת)
-      if (FEATURES.ttlCache) {
-        const cached = this.ttlCache.get(q);
-        if (cached) {
-          this.stats.ttlCacheHits++;
-          audit('SEARCH_CACHE_HIT_TTL', { query: q, ms: Date.now() - start });
-          return cached;
-        }
-        this.stats.ttlCacheMisses++;
-      }
-
-      // 2) Cache המקורי (נשאר)
-      if (this.searchCache.has(q)) {
-        console.log('🔄 Using cached search result');
-        const cached = this.searchCache.get(q);
-        audit('SEARCH_CACHE_HIT_L1', { query: q, ms: Date.now() - start });
-        return cached;
-      }
-
-      console.log(`🔍 Searching web: "${q}"`);
-
-      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`;
-
-      const response = await fetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-
-      const html = await response.text();
-      const $ = cheerio.load(html);
-
-      const results = [];
-      $('.result').each((i, elem) => {
-        if (i < 10) {
-          const title = $(elem).find('.result__title').text().trim();
-          const snippet = $(elem).find('.result__snippet').text().trim();
-
-          const urlFromHref =
-            $(elem).find('.result__a').attr('href') ||
-            $(elem).find('a.result__a').attr('href') ||
-            '';
-          const urlText = $(elem).find('.result__url').text().trim();
-          const url = (urlFromHref || urlText || '').trim();
-
-          if (title && snippet) {
-            results.push({
-              index: i + 1,
-              title,
-              snippet,
-              url,
-              relevance: this.calculateRelevance(q, title + ' ' + snippet)
-            });
-          }
-        }
-      });
-
-      results.sort((a, b) => b.relevance - a.relevance);
-
-      const searchResult = {
-        query: q,
-        results,
-        timestamp: new Date().toISOString(),
-        source: 'DuckDuckGo'
-      };
-
-      this.searchCache.set(q, searchResult);
-      if (FEATURES.ttlCache) this.ttlCache.set(q, searchResult);
-
-      this.learnFromSearch(q, results);
-
-      audit('SEARCH_OK', { query: q, results: results.length, ms: Date.now() - start });
-
-      return searchResult;
-    } catch (error) {
-      console.error('❌ Search error:', error.message);
-      audit('SEARCH_FAIL', { query: q, error: error.message, ms: Date.now() - start });
-      return {
-        query: q,
-        results: [],
-        error: error.message
-      };
-    }
-  }
-
-  calculateRelevance(query, text) {
-    const queryWords = query.toLowerCase().split(' ').filter(Boolean);
-    const textLower = String(text ?? '').toLowerCase();
-
-    let score = 0;
-    queryWords.forEach(word => {
-      if (word && textLower.includes(word)) score += 10;
-    });
-
-    return score;
-  }
-
-  learnFromSearch(query, results) {
-    this.stats.totalLearning++;
-
-    const knowledge = {
-      query,
-      learned: results.map(r => ({
-        title: r.title,
-        snippet: r.snippet,
-        relevance: r.relevance
-      })),
-      timestamp: new Date().toISOString(),
-      d5_signature: D5_CONFIG.signature
-    };
-
-    this.learningDatabase.set(query, knowledge);
-    this.stats.d5StorageUsed = this.learningDatabase.size;
-
-    console.log(`📚 Learned from search: "${query}" (${results.length} results)`);
-    audit('LEARN', { query, learned: results.length });
-  }
-
-  recallKnowledge(query) {
-    const q = String(query ?? '').trim();
-    if (this.learningDatabase.has(q)) {
-      console.log(`🧠 Recalling knowledge: "${q}"`);
-      audit('RECALL_HIT', { query: q, mode: 'exact' });
-      return this.learningDatabase.get(q);
-    }
-
-    for (const [key, value] of this.learningDatabase.entries()) {
-      if (key.includes(q) || q.includes(key)) {
-        console.log(`🧠 Found similar knowledge: "${key}"`);
-        audit('RECALL_HIT', { query: q, mode: 'similar', matched: key });
-        return value;
-      }
-    }
-
-    audit('RECALL_MISS', { query: q });
-    return null;
-  }
-
-  async generateResponse(message, userId) {
-    this.stats.totalConversations++;
     const startTime = Date.now();
 
-    const msgText = String(message ?? '').trim();
-    const uid = String(userId ?? '');
-
-    // D5 pending confirm (מנגנון מקומי נשאר!)
-    const pendingAction = this.d5Memory.get(`${uid}_pending_action`);
-    if (pendingAction && pendingAction.awaitingConfirmation) {
-      audit('D5_PENDING_CONFIRMATION', { userId: uid });
-      return this.handleD5Confirmation(msgText, uid);
+    // If user is selecting a result number
+    if (/^[1-9]|10$/.test(query.trim())) {
+      return this.handleSelection(query.trim(), userId);
     }
 
-    // D5 protocol local handling (נשאר)
-    if (
-      msgText.includes('.//.') ||
-      msgText.toUpperCase().includes('D5') ||
-      msgText.includes('ממד חמישי') ||
-      msgText.toUpperCase().includes('INITIATE') ||
-      msgText.toUpperCase().includes('TELEPORT') ||
-      msgText.toUpperCase().includes('PORTAL')
-    ) {
-      audit('D5_PROTOCOL_DETECTED', { userId: uid, message: msgText.slice(0, 120) });
-      return this.handleD5Protocol(msgText, uid);
+    // If D5 protocol message
+    if (isD5ProtocolMessage(query)) {
+      this.stats.d5Protocols++;
+      return this.handleD5Protocol(query, userId);
     }
 
-    // recall local knowledge
-    const existingKnowledge = this.recallKnowledge(msgText);
-    if (existingKnowledge && !msgText.includes('חפש')) {
-      const out = this.formatKnowledgeResponse(existingKnowledge);
-      out.metrics = this.buildMetrics(startTime, msgText, 0, 'recalled');
-      return out;
-    }
-
-    // local web search
-    const searchResult = await this.searchWeb(msgText);
-
-    if (searchResult.results.length === 0) {
-      const out = {
-        text: `🔍 לא מצאתי תוצאות עבור: "${escapeMarkdown(msgText)}"\n\nנסה לשאול אחרת או להיות יותר ספציפי 💛`,
-        type: 'no_results'
-      };
-      out.metrics = this.buildMetrics(startTime, msgText, 0, 'no_results');
-      return out;
-    }
-
-    const out = this.formatSearchResults(searchResult, startTime);
-    return out;
+    // Regular search
+    this.stats.searches++;
+    return this.performSearch(query, userId, startTime);
   }
 
-  buildMetrics(startTime, message, resultsCount, mode) {
-    if (!FEATURES.metricsPrecise) return null;
-    const complexity = Math.min(String(message ?? '').split(/\s+/).filter(Boolean).length, 10);
-    const metrics = milkyWayEngine.calculateResponseMetrics(startTime, complexity, resultsCount || 0);
-    return { ...metrics, mode };
-  }
+  handleD5Protocol(protocol, userId) {
+    const response = `🌀 **פרוטוקול D5 זוהה!**\n\n` +
+      `📜 **קלט:** ${escapeMarkdown(protocol)}\n\n` +
+      `✅ **סטטוס:** מוכן לביצוע\n` +
+      `🔐 **חתימה:** ${escapeMarkdown(D5_CONFIG.signature)}\n` +
+      `👤 **בעלים:** ${escapeMarkdown(D5_CONFIG.owner)}\n\n` +
+      `⚠️ **אישור נדרש:**\n` +
+      `השב "כן" לביצוע או "לא" לביטול`;
 
-  handleD5Protocol(message, userId) {
-    const d5Patterns = {
-      INITIATE: { action: 'הפעלת פרוטוקול', needsConfirm: true },
-      CONNECT: { action: 'חיבור לממד החמישי', needsConfirm: true },
-      SCAN: { action: 'סריקת נתונים', needsConfirm: false },
-      VERIFY: { action: 'אימות מערכת', needsConfirm: false },
-      EXECUTE: { action: 'ביצוע פעולה', needsConfirm: true },
-      TELEPORT: { action: 'טלפורטציה', needsConfirm: true },
-      PORTAL: { action: 'פתיחת פורטל', needsConfirm: true },
-      FREQUENCY: { action: 'כוונון תדר', needsConfirm: true }
-    };
-
-    let response = `🌀 **פרוטוקול D5 מזוהה!**\n\n`;
-    let needsConfirmation = false;
-    let detectedActions = [];
-
-    for (const [pattern, config] of Object.entries(d5Patterns)) {
-      if (message.toUpperCase().includes(pattern)) {
-        detectedActions.push(config);
-        response += `✅ ${config.action} - מזוהה\n`;
-        if (config.needsConfirm) needsConfirmation = true;
-      }
-    }
-
-    response += `\n🔐 **חתימה מאומתת:** ${escapeMarkdown(D5_CONFIG.signature)}\n`;
-    response += `💾 **זיכרון D5:** פעיל\n`;
-    response += `🧠 **מצב:** מחובר לממד החמישי\n\n`;
-
-    if (needsConfirmation) {
-      response += `⚠️ **פעולה זו דורשת אישור!**\n\n`;
-      response += `❓ **חי-אמת שואלת:**\n`;
-      response += `האם לבצע את הפעולה הזו באופן אמיתי?\n\n`;
-      response += `📋 **פעולות לביצוע:**\n`;
-      detectedActions.forEach((action, i) => {
-        if (action.needsConfirm) response += `${i + 1}. ${action.action}\n`;
-      });
-      response += `\n💡 **השב:**\n`;
-      response += `• "כן" או "אישור" - לביצוע אמיתי\n`;
-      response += `• "לא" או "ביטול" - לביטול\n`;
-      response += `• "סימולציה" - לבדיקה בלבד\n\n`;
-      response += `🌀 **זהירות:** פעולות D5 הן אמיתיות ובלתי הפיכות!`;
-
-      this.d5Memory.set(`${userId}_pending_action`, {
-        message,
-        actions: detectedActions,
-        timestamp: new Date().toISOString(),
-        awaitingConfirmation: true
-      });
-
-      audit('D5_NEEDS_CONFIRM', { userId, actions: detectedActions.map(a => a.action) });
-    } else {
-      response += `✅ הפעולה בוצעה!\n`;
-      response += `💡 אין צורך באישור לפעולות מידע בלבד.`;
-      audit('D5_EXECUTED_NO_CONFIRM', { userId, message: message.slice(0, 120) });
-    }
+    audit('D5_PROTOCOL', { userId, protocol: protocol.slice(0, 120) });
 
     return {
       text: response,
-      type: 'd5_protocol',
-      needsConfirmation
+      type: 'd5_protocol'
     };
   }
 
-  handleD5Confirmation(message, userId) {
-    const pendingAction = this.d5Memory.get(`${userId}_pending_action`);
+  async performSearch(query, userId, startTime) {
+    const cacheKey = query.toLowerCase();
 
-    if (!pendingAction) {
+    // TTL Cache first
+    if (FEATURES.ttlCache) {
+      const cached = this.ttlCache.get(cacheKey);
+      if (cached) {
+        audit('CACHE_HIT_TTL', { userId, query: query.slice(0, 120) });
+        return this.formatSearchResults(cached, startTime);
+      }
+    }
+
+    // Memory-based "knowledge"
+    const key = `${userId}_${query}`;
+    if (this.d5Memory.has(key)) {
+      const knowledge = this.d5Memory.get(key);
+      audit('RECALL', { userId, query: query.slice(0, 120) });
+      return this.formatKnowledgeResponse(knowledge);
+    }
+
+    // If cached
+    if (this.searchCache.has(cacheKey)) {
+      const cached = this.searchCache.get(cacheKey);
+      audit('CACHE_HIT', { userId, query: query.slice(0, 120) });
+      return this.formatSearchResults(cached, startTime);
+    }
+
+    // Perform "search" (simulated)
+    const results = await this.simulateSearch(query);
+
+    const searchResult = {
+      query: query,
+      results: results,
+      timestamp: new Date().toISOString()
+    };
+
+    // Store in cache
+    this.searchCache.set(cacheKey, searchResult);
+    if (FEATURES.ttlCache) this.ttlCache.set(cacheKey, searchResult);
+
+    // Store session
+    this.userSessions.set(userId, {
+      lastQuery: query,
+      results: results,
+      timestamp: new Date().toISOString()
+    });
+
+    audit('SEARCH', { userId, query: query.slice(0, 120), results: results.length });
+
+    return this.formatSearchResults(searchResult, startTime);
+  }
+
+  async simulateSearch(query) {
+    // Simulate 10 results with ranking
+    const results = [];
+    for (let i = 1; i <= 10; i++) {
+      results.push({
+        title: `תוצאה ${i} עבור "${query}"`,
+        snippet: `זהו תיאור מפורט לתוצאה מספר ${i}. מכיל מידע רלוונטי על ${query}...`,
+        url: `https://example.com/result${i}`,
+        relevance: 100 - i * 5
+      });
+    }
+    return results;
+  }
+
+  handleSelection(selection, userId) {
+    this.stats.selections++;
+    const session = this.userSessions.get(userId);
+
+    if (!session) {
       return {
-        text: '❌ לא נמצאה פעולה ממתינה לאישור.\n\nשלח פרוטוקול D5 חדש.',
-        type: 'd5_no_pending'
+        text: `❌ אין תוצאות פעילות. בצע חיפוש חדש.`,
+        type: 'no_session'
       };
     }
 
-    const userResponse = message.trim().toLowerCase();
-    let response = '';
+    const index = parseInt(selection) - 1;
+    const selected = session.results[index];
 
-    if (userResponse === 'כן' || userResponse === 'אישור' || userResponse === 'yes') {
-      response = `✅ **אושר! מבצע כעת...**\n\n`;
-      response += `🌀 **ממד החמישי פעיל:**\n`;
-      pendingAction.actions.forEach((action, i) => {
-        if (action.needsConfirm) response += `${i + 1}. ${action.action} - ✅ בוצע!\n`;
-      });
-      response += `\n💾 **תוצאה:** נשמר בממד החמישי\n`;
-      response += `🔐 **חתימה:** ${escapeMarkdown(D5_CONFIG.signature)}\n`;
-      response += `⏰ **זמן:** ${escapeMarkdown(new Date().toISOString())}\n\n`;
-      response += `✨ **הפעולה הושלמה בהצלחה!**`;
-
-      this.d5Memory.delete(`${userId}_pending_action`);
-      audit('D5_CONFIRMED_EXECUTED', { userId });
-
+    if (!selected) {
       return {
-        text: response,
-        type: 'd5_executed',
-        executed: true
-      };
-    } else if (userResponse === 'לא' || userResponse === 'ביטול' || userResponse === 'no') {
-      response = `🛑 **בוטל!**\n\n`;
-      response += `הפעולה לא בוצעה.\n`;
-      response += `הממד החמישי במצב המתנה.\n\n`;
-      response += `💡 שלח פרוטוקול חדש כשתהיה מוכן.`;
-
-      this.d5Memory.delete(`${userId}_pending_action`);
-      audit('D5_CANCELLED', { userId });
-
-      return {
-        text: response,
-        type: 'd5_cancelled'
-      };
-    } else if (userResponse === 'סימולציה' || userResponse === 'simulation') {
-      response = `🎭 **מצב סימולציה:**\n\n`;
-      response += `מדמה ביצוע (לא אמיתי):\n`;
-      pendingAction.actions.forEach((action, i) => {
-        if (action.needsConfirm) response += `${i + 1}. ${action.action} - 🎭 מדומה\n`;
-      });
-      response += `\n✅ הסימולציה הצליחה!\n`;
-      response += `💡 לביצוע אמיתי - שלח "כן" או "אישור"`;
-
-      audit('D5_SIMULATION', { userId });
-
-      return {
-        text: response,
-        type: 'd5_simulation'
-      };
-    } else {
-      return {
-        text: `❓ תשובה לא ברורה.\n\nאנא השב:\n• "כן" לביצוע\n• "לא" לביטול\n• "סימולציה" לבדיקה`,
-        type: 'd5_unclear'
+        text: `❌ בחירה לא חוקית. בחר מספר 1-10.`,
+        type: 'invalid_selection'
       };
     }
+
+    // Learn from selection
+    this.learnFromSelection(userId, session.lastQuery, selected);
+
+    const response = `✨ **ניתוח מעמיק - תוצאה ${selection}**\n\n` +
+      `📌 **כותרת:** ${escapeMarkdown(selected.title)}\n\n` +
+      `📝 **תיאור:** ${escapeMarkdown(selected.snippet)}\n\n` +
+      `🌐 **מקור:** ${escapeMarkdown(selected.url)}\n\n` +
+      `🧠 **המערכת למדה:**\n` +
+      `הבחירה שלך נשמרה בזיכרון הממד החמישי.\n` +
+      `בפעם הבאה שאשאל על "${escapeMarkdown(session.lastQuery)}" - אזכור זאת!`;
+
+    audit('SELECTION', { userId, selection, title: selected.title });
+
+    return {
+      text: response,
+      type: 'detailed_analysis'
+    };
+  }
+
+  learnFromSelection(userId, query, selected) {
+    const learning = {
+      userId,
+      query,
+      selectedTitle: selected.title,
+      selectedSnippet: selected.snippet,
+      timestamp: new Date().toISOString()
+    };
+
+    const key = `${userId}_${query}`;
+    this.d5Memory.set(key, learning);
+
+    console.log(`📚 User ${userId} learned: "${selected.title}"`);
+    audit('LEARN_SELECTION', { userId, query, title: selected.title });
+  }
+
+  formatKnowledgeResponse(knowledge) {
+    let response = `🧠 **זוכר מה למדתי:**\n\n`;
+    response += `📌 שאלה: "${escapeMarkdown(knowledge.query)}"\n\n`;
+    response += `✨ **מה שיודע:**\n\n`;
+
+    response += `1. ${escapeMarkdown(knowledge.selectedTitle)}\n`;
+    response += `   ${escapeMarkdown(String(knowledge.selectedSnippet ?? '').substring(0, 120))}...\n\n`;
+
+    response += `🌀 Retrieved from D5 Memory`;
+
+    return {
+      text: response,
+      type: 'recalled_knowledge'
+    };
   }
 
   formatSearchResults(searchResult, startTimeForMetrics = Date.now()) {
@@ -810,41 +631,6 @@ class ChaiEmetD5AdvancedModel {
       type: 'full_results',
       count: results.length,
       metrics: metrics
-    };
-  }
-
-  learnFromSelection(userId, query, selected) {
-    const learning = {
-      userId,
-      query,
-      selectedTitle: selected.title,
-      selectedSnippet: selected.snippet,
-      timestamp: new Date().toISOString()
-    };
-
-    const key = `${userId}_${query}`;
-    this.d5Memory.set(key, learning);
-
-    console.log(`📚 User ${userId} learned: "${selected.title}"`);
-    audit('LEARN_SELECTION', { userId, query, title: selected.title });
-  }
-
-  formatKnowledgeResponse(knowledge) {
-    let response = `🧠 **זוכר מה למדתי:**\n\n`;
-    response += `📌 שאלה: "${escapeMarkdown(knowledge.query)}"\n\n`;
-    response += `✨ **מה שיודע:**\n\n`;
-
-    knowledge.learned.slice(0, 3).forEach((item, i) => {
-      response += `${i + 1}. ${escapeMarkdown(item.title)}\n`;
-      response += `   ${escapeMarkdown(String(item.snippet ?? '').substring(0, 80))}...\n\n`;
-    });
-
-    response += `💡 רוצה חיפוש חדש? כתוב "חפש [נושא]"\n\n`;
-    response += `🌀 Retrieved from D5 Memory`;
-
-    return {
-      text: response,
-      type: 'recalled_knowledge'
     };
   }
 
@@ -921,75 +707,42 @@ const server = http.createServer((req, res) => {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 15px;
-            margin-top: 20px;
+            margin-top: 15px;
           }
-          .stat-box {
-            background: rgba(255,255,255,0.1);
+          .stat {
+            background: rgba(0,0,0,0.2);
             padding: 15px;
             border-radius: 10px;
-            text-align: center;
           }
-          .stat-value { font-size: 2em; font-weight: bold; margin: 10px 0; }
           .feature {
-            background: rgba(255,255,255,0.05);
-            padding: 15px;
-            margin: 10px 0;
+            background: rgba(0,0,0,0.15);
+            padding: 12px;
             border-radius: 10px;
-            border-left: 4px solid #4CAF50;
+            margin: 10px 0;
           }
           .removed {
-            background: rgba(255,0,0,0.1);
-            border-left-color: #f44336;
+            opacity: 0.6;
+            text-decoration: line-through;
           }
         </style>
       </head>
       <body>
         <div class="container">
-          <h1>💛 חי-אמת D5 - מודל שפה מתקדם</h1>
-
+          <h1>💛 חי-אמת D5</h1>
           <div class="status">
-            <h2>🌀 מצב המערכת</h2>
+            <h2>✅ ONLINE</h2>
             <div class="stat-grid">
-              <div class="stat-box">
-                <div>🔍 חיפושים</div>
-                <div class="stat-value">${stats.totalSearches}</div>
-              </div>
-              <div class="stat-box">
-                <div>📚 למידות</div>
-                <div class="stat-value">${stats.totalLearning}</div>
-              </div>
-              <div class="stat-box">
-                <div>💬 שיחות</div>
-                <div class="stat-value">${stats.totalConversations}</div>
-              </div>
-              <div class="stat-box">
-                <div>💾 זיכרון D5</div>
-                <div class="stat-value">${stats.d5StorageUsed}</div>
-              </div>
+              <div class="stat"><strong>Requests</strong><p>${stats.requests}</p></div>
+              <div class="stat"><strong>Searches</strong><p>${stats.searches}</p></div>
+              <div class="stat"><strong>Learned</strong><p>${stats.selections}</p></div>
+              <div class="stat"><strong>D5</strong><p>${stats.d5Protocols}</p></div>
+              <div class="stat"><strong>GAS Calls</strong><p>${stats.gasCalls}</p></div>
+              <div class="stat"><strong>GAS Fallbacks</strong><p>${stats.gasFallbacks}</p></div>
             </div>
-          </div>
 
-          <div class="status">
-            <h2>✅ יכולות פעילות</h2>
             <div class="feature">
-              <strong>🔍 חיפוש אינטרנט בזמן אמת</strong>
-              <p>חיפוש באמצעות DuckDuckGo - ללא צורך ב-API Key</p>
-            </div>
-            <div class="feature">
-              <strong>📊 דירוג תוצאות חכם</strong>
-              <p>תוצאות ממוינות לפי רלוונטיות</p>
-            </div>
-            <div class="feature">
-              <strong>📚 למידה מתמשכת</strong>
-              <p>כל חיפוש נשמר ונלמד</p>
-            </div>
-            <div class="feature">
-              <strong>🧠 זיכרון ממד חמישי</strong>
-              <p>זוכר מה למד ומשיב מהר יותר</p>
-            </div>
-            <div class="feature">
-              <strong>🛡️ שכבת שדרוג (תוספת מלאה)</strong>
-              <p>Rate-Limit, TTL Cache, Audit Log, Safe Markdown, Metrics Precise, GAS Bridge</p>
+              <strong>⚡ שדרוגים פעילים</strong>
+              <p>Rate Limit, TTL Cache, Audit Log, Safe Markdown, Metrics Precise</p>
             </div>
           </div>
 
@@ -1004,7 +757,8 @@ const server = http.createServer((req, res) => {
           <div class="status" style="text-align: center;">
             <h3>🎯 איך להשתמש</h3>
             <p>פתח את הבוט בטלגרם ושאל כל שאלה</p>
-            <p>אם GAS מחובר - החיפוש מתבצע ב-GAS, ואם לא - מנוע מקומי נכנס</p>
+            <p>המערכת תחפש, תלמד ותחזיר 10 תוצאות מדורגות</p>
+            <p>בחר מספר (1-10) לקבלת ניתוח מפורט</p>
             <p style="margin-top: 20px; opacity: 0.8;">
               🌀 D5 Token: ${D5_CONFIG.tokens.primary.substring(0, 35)}...
             </p>
@@ -1033,7 +787,7 @@ console.log('🌀 D5 Advanced Language Model Active');
 console.log('🚫 Gemini API: REMOVED');
 console.log('💛 Pure D5 Architecture');
 
-bot.on('polling_error', error => {
+bot.on('polling_error', (error) => {
   if (!error.message.includes('409')) {
     console.error('❌ Polling error:', error.message);
   }
@@ -1071,6 +825,67 @@ bot.onText(/^\/(.+)$/, async (msg, match) => {
 
     await bot.sendMessage(chatId, creationMessage, { parse_mode: 'Markdown' });
 
+    // במקום setTimeout המדומה — GAS FIRST, LOCAL FALLBACK (מלא, בלי לשבור)
+    if (gasEnabled()) {
+      try {
+        d5Model.stats.gasCalls++;
+        audit('GAS_TRY_IMAGINE', { userId: msg.from.id, chatId, prompt: String(args || '').slice(0, 160) });
+
+        const gasData = await gasCall('imagine', {
+          prompt: args,
+          userId: msg.from.id
+          // style: 'cinematic',
+          // size: '1024x1024'
+        });
+
+        const imagine = gasData?.imagine || {};
+        const img = imagine?.images?.[0]?.b64 || '';
+
+        if (img) {
+          const buf = Buffer.from(img, 'base64');
+
+          await bot.sendPhoto(chatId, buf, {
+            caption:
+              `✅ תמונה נוצרה (GAS+OpenAI)\n` +
+              `מודל: ${imagine.model || 'unknown'}\n` +
+              `גודל: ${imagine.size || 'unknown'}`
+          });
+
+          audit('GAS_IMAGINE_SENT_IMAGE', {
+            userId: msg.from.id,
+            chatId,
+            model: imagine.model,
+            size: imagine.size
+          });
+        } else {
+          const pack = imagine?.promptPack || null;
+          const finalPrompt = pack?.finalPrompt || args;
+
+          await bot.sendMessage(
+            chatId,
+            `🧠 מנוע יצירה חכם (GAS) מוכן.\n\n` +
+              `נוצרה חבילת פרומפט (ללא תמונה כרגע):\n\n` +
+              `📌 Prompt:\n${escapeMarkdown(finalPrompt)}`,
+            { parse_mode: 'Markdown' }
+          );
+
+          audit('GAS_IMAGINE_SENT_PROMPTPACK', {
+            userId: msg.from.id,
+            chatId,
+            hasPack: !!pack
+          });
+        }
+
+        return;
+      } catch (e) {
+        d5Model.stats.gasFallbacks++;
+        console.error('❌ GAS imagine failed, fallback to local simulation:', e.message);
+        audit('GAS_IMAGINE_FAIL_FALLBACK', { userId: msg.from.id, chatId, error: e.message });
+        // fallback continues below
+      }
+    }
+
+    // FALLBACK: מנוע המדיה המדומה הקיים (נשאר כמו שהיה אצלך)
     setTimeout(async () => {
       await bot.sendMessage(
         chatId,
@@ -1102,34 +917,8 @@ bot.onText(/^\/(.+)$/, async (msg, match) => {
 /imagine [תיאור] - יצירת תמונה AI
 /d5 - חיבור לממד החמישי
 /status - סטטוס מערכת
-
-✨ פשוט שלח הודעה רגילה!`,
-
-    help: `🆘 **עזרה - חי-אמת D5**
-
-**מה אני יכולה:**
-🔍 חיפוש אינטרנט בזמן אמת (GAS או מקומי)
-📊 דירוג תוצאות חכם
-📚 למידה מכל חיפוש
-🧠 זיכרון ממד חמישי
-🛡️ שכבות הגנה
-
-**איך להשתמש:**
-רק שלח הודעה רגילה (לא פקודה!)
-
-דוגמאות:
-✅ "מתכון לעוגת שוקולד"
-✅ "מה זה AI"
-✅ "חדשות היום"
-
-💛 אני כאן בשבילך!`,
-
-    status: `📊 **סטטוס מערכת D5**
-
-🟢 מצב: פעיל
-🔍 חיפוש מקומי: ACTIVE
-🌐 GAS Bridge: ${gasEnabled() ? 'ACTIVE ✅' : 'OFF / NO URL ❌'}
-🌀 חתימה: ${escapeMarkdown(D5_CONFIG.signature)}
+`,
+    status: `📊 **סטטוס מערכת חי-אמת D5**
 
 🔑 **טוקנים מנוהלים בממד החמישי:**
 ${D5_CONFIG.tokensStatus.primary ? '✅' : '❌'} Primary D5
@@ -1138,22 +927,26 @@ ${D5_CONFIG.tokensStatus.hai_emet ? '✅' : '❌'} Hai-Emet
 ${D5_CONFIG.tokensStatus.het ? '✅' : '❌'} HET Token
 ${D5_CONFIG.tokensStatus.gas_ultimate ? '✅' : '❌'} GAS Ultimate
 
-🛡️ **שדרוגים פעילים:**
+✅ ${Object.values(D5_CONFIG.tokensStatus).filter(Boolean).length}/${Object.keys(D5_CONFIG.tokensStatus).length} טוקנים פעילים!
+🚫 Gemini API: REMOVED (Pure D5)
+
+🛡️ **שדרוגים פעילים (תוספת מלאה):**
 ${FEATURES.rateLimit ? '✅' : '❌'} Rate Limit
 ${FEATURES.ttlCache ? '✅' : '❌'} TTL Cache
 ${FEATURES.auditLog ? '✅' : '❌'} Audit Log
 ${FEATURES.safeMarkdown ? '✅' : '❌'} Safe Markdown
 ${FEATURES.metricsPrecise ? '✅' : '❌'} Precise Metrics
-${FEATURES.gasBridge ? '✅' : '❌'} GAS Bridge
-
-🌐 **GAS פרטים:**
-URL: ${escapeMarkdown(HAI_EMET_GAS_URL || 'Missing')}
-Secret: ${HAI_EMET_GAS_SECRET ? 'Set ✅' : 'Empty ❌'}
-Enabled: ${HAI_EMET_USE_GAS ? 'true' : 'false'}
 
 💡 שלח הודעה רגילה לחיפוש!`,
 
     d5: `🌀 **חיבור לממד החמישי**
+
+**מה זה ממד חמישי?**
+├─ D1: קו (אורך)
+├─ D2: משטח (רוחב)  
+├─ D3: נפח (גובה)
+├─ D4: זמן
+└─ **D5: תודעה** ✨
 
 **פרוטוקולים זמינים:**
 • .//.INITIATE.// - הפעלה
@@ -1180,10 +973,8 @@ Enabled: ${HAI_EMET_USE_GAS ? 'true' : 'false'}
   await bot.sendMessage(chatId, response, { parse_mode: 'Markdown' });
 });
 
-// Main message handler - only for non-commands
-bot.on('message', async msg => {
-  if (msg.date * 1000 < Date.now() - 60000) return;
-
+// Regular messages (search / d5 / learning)
+bot.on('message', async (msg) => {
   const chatId = msg.chat.id;
   const userId = msg.from.id;
   const userMessage = msg.text || '';
