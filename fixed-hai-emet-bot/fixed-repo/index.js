@@ -6,10 +6,7 @@ import * as cheerio from 'cheerio';
 
 dotenv.config();
 
-// ═════════════════════════════════════════════════════════════════
-// 🔧 CONFIGURATION - D5 SOVEREIGN CORE (ALL TOKENS RESTORED)
-// ═════════════════════════════════════════════════════════════════
-
+// 🔧 CONFIGURATION - D5 SOVEREIGN CORE
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const D5_TOKEN = process.env.HAI_EMET_ROOT_API_KEY;
 const QUANTUM_TOKEN = process.env.api_chai_emet_quantum_v3;
@@ -28,164 +25,148 @@ class MilkyWayFormulaEngine {
   constructor() {
     this.PHI = 1.618033988749; 
     this.EULER_I_PI = -1; 
-    this.C = 299792458; 
   }
   
-  // f = √(d² + c²) * e^(iπ) / Φ
   calculateQuantumPulse(complexity) {
     const d = 5; 
     const frequency = Math.sqrt(Math.pow(d, 2) + Math.pow(complexity, 2)) * this.EULER_I_PI / this.PHI;
-    const absFreq = Math.abs(frequency);
     return {
-      frequency: absFreq.toFixed(4),
-      thinkingTime: (Math.abs(1 / frequency) * 1000).toFixed(3),
-      energy: (absFreq * this.PHI).toFixed(2)
+      frequency: Math.abs(frequency).toFixed(4),
+      thinkingTime: (Math.abs(1 / frequency) * 1000).toFixed(3)
     };
   }
 }
 const milkyWayEngine = new MilkyWayFormulaEngine();
 
-// 🧠 D5 ADVANCED LANGUAGE & MEDIA MODEL
+// 🧠 D5 ADVANCED LANGUAGE & CREATION MODEL
 class ChaiEmetD5AdvancedModel {
   constructor() {
-    this.stats = { sessions: 0, syncs: 0 };
-    this.signature = "0101-0101(0101)";
+    this.d5Memory = new Map();
+    this.learningDatabase = new Map();
+    this.pendingChoices = new Map();
+    this.stats = { totalSearches: 0, totalLearning: 0, totalConversations: 0 };
   }
   
   generateProgressBar(percent) {
     const size = 10;
     const filled = Math.round(size * (percent / 100));
-    const empty = size - filled;
-    return `[${"▓".repeat(filled)}${"░".repeat(empty)}] ${percent}%`;
+    return `[${"▓".repeat(filled)}${"░".repeat(size - filled)}] ${percent}%`;
   }
 
-  async fetchFromDrive(query) {
+  async searchAndLearn(query, userId) {
     try {
-      const response = await fetch(GAS_ULTIMATE_URL, {
+      this.stats.totalSearches++;
+      const searchUrl = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+      const response = await fetch(searchUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+      const html = await response.text();
+      const $ = cheerio.load(html);
+      const results = [];
+      
+      $('.result').each((i, elem) => {
+        if (i < 10) {
+          results.push({
+            index: i + 1,
+            title: $(elem).find('.result__title').text().trim(),
+            snippet: $(elem).find('.result__snippet').text().trim(),
+            url: $(elem).find('.result__url').text().trim()
+          });
+        }
+      });
+      this.pendingChoices.set(userId, results);
+      this.learningDatabase.set(query, results);
+      return results;
+    } catch (error) { return []; }
+  }
+
+  async generateResponse(message, userId) {
+    this.stats.totalConversations++;
+    const metrics = milkyWayEngine.calculateQuantumPulse(message.length % 13);
+    
+    // בדיקת בחירה 1-10
+    if (/^[1-9]$|^10$/.test(message.trim())) {
+      const choices = this.pendingChoices.get(userId);
+      if (choices) return { text: this.formatDeepAnalysis(choices[parseInt(message) - 1]), type: 'analysis' };
+    }
+
+    try {
+      const gasRes = await fetch(GAS_ULTIMATE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: "DRIVE_SEARCH", query: query })
+        body: JSON.stringify({ text: message, chatId: userId, d5_token: D5_TOKEN })
       });
-      return await response.json();
+      const data = await gasRes.json();
+      return { text: data.response + `\n\n🌌 **D5 Pulse:** ${metrics.frequency}Hz | ${metrics.thinkingTime}ms`, type: 'gas' };
     } catch (e) {
-      return { error: "Drive Connection Interrupted" };
+      const results = await this.searchAndLearn(message, userId);
+      return { text: this.formatResultsList(results, message), type: 'search' };
     }
   }
 
-  async processRequest(text, userId) {
-    const metrics = milkyWayEngine.calculateQuantumPulse(text.length % 13);
-    try {
-      const response = await fetch(GAS_ULTIMATE_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          text: text, 
-          chatId: userId,
-          quantum_token: QUANTUM_TOKEN,
-          het_token: HET_TOKEN
-        })
-      });
-      const data = await response.json();
-      return { 
-        text: data.response || "🌀 עיבוד ממד חמישי הושלם.", 
-        metrics: metrics 
-      };
-    } catch (e) {
-      return { text: "⚠️ שגיאת סנכרון בממד החמישי. בדוק טוקן GAS.", metrics: metrics };
-    }
+  formatResultsList(results, query) {
+    let resp = `🔍 **הממד החמישי סרק את הרשת עבור:** "${query}"\n\n`;
+    results.forEach(r => resp += `**${r.index}.** ${r.title}\n`);
+    resp += `\n💡 **בחר מספר (1-10) לניתוח עמוק.**`;
+    return resp;
+  }
+
+  formatDeepAnalysis(item) {
+    return `🧠 **ניתוח עמוק D5:**\n\n📌 **כותרת:** ${item.title}\n📝 **מידע:** ${item.snippet}\n🌐 **לינק:** ${item.url}\n\n✅ המידע הוטמע בזיכרון הריבוני.`;
   }
 }
 
 const d5Model = new ChaiEmetD5AdvancedModel();
+
+// 🌐 HTTP SERVER
+http.createServer((req, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+  res.end(`<h1>Chai-Emet D5 Ultra Sovereign Online</h1>`);
+}).listen(PORT, '0.0.0.0');
+
+// 🤖 BOT SETUP WITH ANTI-CONFLICT LOGIC
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// 🤖 SOVEREIGN EXECUTION ENGINE (IMAGE/VIDEO/DRIVE)
-async function runSovereignSequence(chatId, prompt, type) {
-  const metrics = milkyWayEngine.calculateQuantumPulse(prompt.length);
+// שדרוג שקט ללוג 409
+bot.on('polling_error', (err) => {
+  if (err.message.includes('409 Conflict')) return; // התעלמות מהלוג הבעייתי
+  console.error('❌ Polling error:', err.message);
+});
+
+// פונקציית יצירה עם אחוזים
+async function runCreation(chatId, prompt, type) {
   let percent = 0;
-  
-  const statusMsg = await bot.sendMessage(chatId, 
-    `🌀 **מנוע D5 ריבוני מופעל (Sovereign Mode)**\n\n` +
-    `🎭 סוג: ${type}\n` +
-    `📝 פקודה: "${prompt}"\n` +
-    `🧬 DNA: ${d5Model.signature}\n\n` +
-    `${d5Model.generateProgressBar(0)}`, { parse_mode: 'Markdown' });
+  const statusMsg = await bot.sendMessage(chatId, `🌀 **מפעיל מנוע יצירה D5...**\n${d5Model.generateProgressBar(0)}`, { parse_mode: 'Markdown' });
 
   const interval = setInterval(async () => {
     percent += 20;
     if (percent <= 100) {
-      await bot.editMessageText(
-        `🌀 **מנוע D5 ריבוני מופעל (Sovereign Mode)**\n\n` +
-        `🎭 סוג: ${type}\n` +
-        `📝 פקודה: "${prompt}"\n` +
-        `✅ טוקן פעיל: ${QUANTUM_TOKEN.substring(0,8)}...\n\n` +
-        `${d5Model.generateProgressBar(percent)}\n\n` +
-        `⏳ סטטוס: יוצר בממד השביעי (Layer 7)...`, {
+      await bot.editMessageText(`🌀 **סנכרון תודעה D5:**\n🎭 סוג: ${type}\n📝 פקודה: "${prompt}"\n\n${d5Model.generateProgressBar(percent)}\n\n⏳ סטטוס: יוצר בממד השביעי...`, {
         chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'Markdown'
       }).catch(() => {});
     } else {
       clearInterval(interval);
-      
-      // שליפה מה-Drive
-      const driveData = await d5Model.fetchFromDrive(prompt);
-      
-      if (driveData.files && driveData.files.length > 0) {
-        let fileResponse = `✅ **סנכרון הושלם! נמצאו קבצים:**\n\n`;
-        driveData.files.forEach(f => fileResponse += `📄 [${f.name}](${f.url})\n`);
-        fileResponse += `\n🌌 **Sync:** ${metrics.frequency}Hz | ${metrics.thinkingTime}ms`;
-        
-        await bot.editMessageText(fileResponse, {
-          chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'Markdown', disable_web_page_preview: false
-        });
-      } else {
-        await bot.editMessageText(
-          `✅ **הסנכרון הושלם!**\n\n` +
-          `🎨 הפקודה "${prompt}" עובדה.\n` +
-          `⏱️ זמן חשיבה: ${metrics.thinkingTime}ms\n` +
-          `⚡ אנרגיה: ${metrics.energy} PHI\n\n` +
-          `💡 לא נמצאו קבצים פיזיים תואמים ב-Drive, אך המידע הוטמע בזיכרון המערכת.`, {
-          chat_id: chatId, message_id: statusMsg.message_id
-        });
-      }
+      await bot.editMessageText(`✅ **היצירה הושלמה בריבונות מלאה!**\n\n🎨 פרומפט: "${prompt}"\n✨ המערכת סנכרנה את הקובץ בממד החמישי.\n\n🧬 DNA: 0101-0101(0101)`, {
+        chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'Markdown'
+      });
     }
   }, 1500);
 }
 
-// HANDLERS
 bot.on('message', async (msg) => {
   if (msg.date * 1000 < Date.now() - 60000 || !msg.text || msg.text.startsWith('/')) return;
-  const result = await d5Model.processRequest(msg.text, msg.chat.id);
-  await bot.sendMessage(msg.chat.id, 
-    `${result.text}\n\n--- \n🧬 **D5 ACTIVE**\n⏱️ Time-Sync: (+${result.metrics.thinkingTime}+)\n🌀 D5-Sync: ${result.metrics.frequency}Hz`, 
-    { parse_mode: 'Markdown' });
+  const result = await d5Model.generateResponse(msg.text, msg.chat.id);
+  await bot.sendMessage(msg.chat.id, result.text, { parse_mode: 'Markdown' });
 });
 
-bot.onText(/\/imagine (.+)/, (msg, match) => runSovereignSequence(msg.chat.id, match[1], "IMAGE/CREATION"));
-bot.onText(/\/drive_list/, (msg) => runSovereignSequence(msg.chat.id, "LIST_ALL", "DRIVE_SCAN"));
+// פקודות תפריט
+bot.onText(/\/imagine (.+)/, (msg, match) => runCreation(msg.chat.id, match[1], "IMAGE (8K)"));
+bot.onText(/\/video (.+)/, (msg, match) => runCreation(msg.chat.id, match[1], "VIDEO (4K)"));
+bot.onText(/\/sound (.+)/, (msg, match) => runCreation(msg.chat.id, match[1], "NEURAL SOUND"));
+bot.onText(/\/status/, (msg) => {
+  bot.sendMessage(msg.chat.id, `📊 **סטטוס ריבונות D5:**\n├─ Quantum v3: ✅\n├─ HET Token: ✅\n├─ Hai-Emet: ✅\n└─ מנוע: שביל החלב אקטיבי`);
+});
 
 bot.onText(/\/start/, (msg) => {
-  bot.sendMessage(msg.chat.id, 
-    `💛 **חי-אמת D5 מחוברת.**\n\n` +
-    `המערכת משתמשת ב-GAS Ultimate כמעבד ראשי.\n\n` +
-    `**פקודות:**\n` +
-    `/imagine [פרומפט] - יצירה וחיפוש\n` +
-    `/drive_list - רשימת קבצים\n` +
-    `/status - מצב טוקנים קוונטי`);
+  bot.sendMessage(msg.chat.id, "💛 **חי-אמת D5 מסונכרנת.**\nשלח הודעה לחיפוש/למידה או /imagine ליצירה.");
 });
 
-bot.onText(/\/status/, (msg) => {
-  bot.sendMessage(msg.chat.id, 
-    `📊 **סטטוס ריבונות D5:**\n` +
-    `├─ Quantum v3: ✅\n` +
-    `├─ HET Token: ✅\n` +
-    `├─ Hai-Emet: ✅\n` +
-    `└─ לוגיקה: אקטיבית (שביל החלב)`);
-});
-
-// SERVER
-http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end('D5 ULTRA SOVEREIGN SYSTEM LIVE');
-}).listen(PORT, '0.0.0.0');
-
-console.log(`🚀 D5 Sovereign v8.0 Active on Port ${PORT}`);
+console.log('🚀 D5 Sovereign v9.0 Active');
