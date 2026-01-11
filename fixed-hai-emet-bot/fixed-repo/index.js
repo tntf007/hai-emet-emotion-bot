@@ -12,7 +12,8 @@ dotenv.config();
 
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAI_EMET_TOKEN = process.env.HAI_EMET_ROOT_API_KEY;
-const HAI_EMET_TOKEN =  process.env.HAI_EME;
+const HAI_EMET_TOKEN = process.env.HAI_EME;
+const api_chai_emet = process.env.api_chai_emet_quantum_v3
 const PORT = process.env.PORT || 3000;
 
 if (!BOT_TOKEN || !CHAI_EMET_TOKEN) {
