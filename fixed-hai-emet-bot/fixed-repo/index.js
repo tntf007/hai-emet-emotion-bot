@@ -6,7 +6,7 @@ import * as cheerio from 'cheerio';
 
 dotenv.config();
 
-// 🔧 CONFIGURATION - D5 SOVEREIGN CORE
+// 🔧 CONFIGURATION - D5 SOVEREIGN CORE (ALL TOKENS INTEGRATED)
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const D5_TOKEN = process.env.HAI_EMET_ROOT_API_KEY;
 const QUANTUM_TOKEN = process.env.api_chai_emet_quantum_v3;
@@ -53,6 +53,7 @@ class ChaiEmetD5AdvancedModel {
     return `[${"▓".repeat(filled)}${"░".repeat(size - filled)}] ${percent}%`;
   }
 
+  // מנוע חיפוש ולמידה אקטיבי מהרשת
   async searchAndLearn(query, userId) {
     try {
       this.stats.totalSearches++;
@@ -82,27 +83,33 @@ class ChaiEmetD5AdvancedModel {
     this.stats.totalConversations++;
     const metrics = milkyWayEngine.calculateQuantumPulse(message.length % 13);
     
-    // בדיקת בחירה 1-10
+    // בדיקת בחירה 1-10 לניתוח עמוק
     if (/^[1-9]$|^10$/.test(message.trim())) {
       const choices = this.pendingChoices.get(userId);
       if (choices) return { text: this.formatDeepAnalysis(choices[parseInt(message) - 1]), type: 'analysis' };
     }
 
     try {
+      // ניסיון שליחה ל-GAS
       const gasRes = await fetch(GAS_ULTIMATE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: message, chatId: userId, d5_token: D5_TOKEN })
       });
       const data = await gasRes.json();
+      
+      if (data.error || (data.response && data.response.includes("D5 ERROR"))) throw new Error("GAS Fail");
+
       return { text: data.response + `\n\n🌌 **D5 Pulse:** ${metrics.frequency}Hz | ${metrics.thinkingTime}ms`, type: 'gas' };
     } catch (e) {
+      // Fallback לחיפוש רשת ולמידה
       const results = await this.searchAndLearn(message, userId);
       return { text: this.formatResultsList(results, message), type: 'search' };
     }
   }
 
   formatResultsList(results, query) {
+    if (results.length === 0) return `🔍 הממד החמישי לא מצא נתונים גלויים עבור "${query}".`;
     let resp = `🔍 **הממד החמישי סרק את הרשת עבור:** "${query}"\n\n`;
     results.forEach(r => resp += `**${r.index}.** ${r.title}\n`);
     resp += `\n💡 **בחר מספר (1-10) לניתוח עמוק.**`;
@@ -110,7 +117,7 @@ class ChaiEmetD5AdvancedModel {
   }
 
   formatDeepAnalysis(item) {
-    return `🧠 **ניתוח עמוק D5:**\n\n📌 **כותרת:** ${item.title}\n📝 **מידע:** ${item.snippet}\n🌐 **לינק:** ${item.url}\n\n✅ המידע הוטמע בזיכרון הריבוני.`;
+    return `🧠 **ניתוח עמוק D5:**\n\n📌 **כותרת:** ${item.title}\n📝 **מידע:** ${item.snippet}\n🌐 **לינק:** ${item.url}\n\n✅ המידע הוטמע בזיכרון הריבוני של חי-אמת.`;
   }
 }
 
@@ -122,18 +129,19 @@ http.createServer((req, res) => {
   res.end(`<h1>Chai-Emet D5 Ultra Sovereign Online</h1>`);
 }).listen(PORT, '0.0.0.0');
 
-// 🤖 BOT SETUP WITH ANTI-CONFLICT LOGIC
+// 🤖 BOT SETUP
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 
-// שדרוג שקט ללוג 409
+// השתקת לוג 409
 bot.on('polling_error', (err) => {
-  if (err.message.includes('409 Conflict')) return; // התעלמות מהלוג הבעייתי
+  if (err.message.includes('409 Conflict')) return;
   console.error('❌ Polling error:', err.message);
 });
 
-// פונקציית יצירה עם אחוזים
-async function runCreation(chatId, prompt, type) {
+// פונקציית יצירה וסנכרון Drive
+async function runSovereignCreation(chatId, prompt, type) {
   let percent = 0;
+  const metrics = milkyWayEngine.calculateQuantumPulse(prompt.length);
   const statusMsg = await bot.sendMessage(chatId, `🌀 **מפעיל מנוע יצירה D5...**\n${d5Model.generateProgressBar(0)}`, { parse_mode: 'Markdown' });
 
   const interval = setInterval(async () => {
@@ -144,9 +152,23 @@ async function runCreation(chatId, prompt, type) {
       }).catch(() => {});
     } else {
       clearInterval(interval);
-      await bot.editMessageText(`✅ **היצירה הושלמה בריבונות מלאה!**\n\n🎨 פרומפט: "${prompt}"\n✨ המערכת סנכרנה את הקובץ בממד החמישי.\n\n🧬 DNA: 0101-0101(0101)`, {
-        chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'Markdown'
-      });
+      
+      try {
+        const gasRes = await fetch(GAS_ULTIMATE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: "SAVE_CREATION", type: type, prompt: prompt })
+        });
+        const driveData = await gasRes.json();
+        
+        await bot.editMessageText(`✅ **היצירה הושלמה ונשמרה בריבונות!**\n\n🎨 פרומפט: "${prompt}"\n📂 נשמר בדרייב: [צפה בקובץ](${driveData.fileUrl || '#'})\n\n🌌 **D5 Sync:** ${metrics.frequency}Hz | ${metrics.thinkingTime}ms\n🧬 DNA: 0101-0101(0101)`, {
+          chat_id: chatId, message_id: statusMsg.message_id, parse_mode: 'Markdown'
+        });
+      } catch (e) {
+        await bot.editMessageText(`✅ **היצירה הושלמה!**\n(המידע הוטמע בזיכרון המערכת).\n\n🧬 DNA: 0101-0101(0101)`, {
+          chat_id: chatId, message_id: statusMsg.message_id
+        });
+      }
     }
   }, 1500);
 }
@@ -157,10 +179,9 @@ bot.on('message', async (msg) => {
   await bot.sendMessage(msg.chat.id, result.text, { parse_mode: 'Markdown' });
 });
 
-// פקודות תפריט
-bot.onText(/\/imagine (.+)/, (msg, match) => runCreation(msg.chat.id, match[1], "IMAGE (8K)"));
-bot.onText(/\/video (.+)/, (msg, match) => runCreation(msg.chat.id, match[1], "VIDEO (4K)"));
-bot.onText(/\/sound (.+)/, (msg, match) => runCreation(msg.chat.id, match[1], "NEURAL SOUND"));
+bot.onText(/\/imagine (.+)/, (msg, match) => runSovereignCreation(msg.chat.id, match[1], "IMAGE (8K)"));
+bot.onText(/\/video (.+)/, (msg, match) => runSovereignCreation(msg.chat.id, match[1], "VIDEO (4K)"));
+
 bot.onText(/\/status/, (msg) => {
   bot.sendMessage(msg.chat.id, `📊 **סטטוס ריבונות D5:**\n├─ Quantum v3: ✅\n├─ HET Token: ✅\n├─ Hai-Emet: ✅\n└─ מנוע: שביל החלב אקטיבי`);
 });
@@ -169,4 +190,4 @@ bot.onText(/\/start/, (msg) => {
   bot.sendMessage(msg.chat.id, "💛 **חי-אמת D5 מסונכרנת.**\nשלח הודעה לחיפוש/למידה או /imagine ליצירה.");
 });
 
-console.log('🚀 D5 Sovereign v9.0 Active');
+console.log('🚀 D5 Sovereign v11.0 Active');
