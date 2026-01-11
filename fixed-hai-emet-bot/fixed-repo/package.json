@@ -1,0 +1,22 @@
+{
+  "name": "chai-emet-d5-advanced-language-model",
+  "version": "2.0.0",
+  "description": "חי-אמת - D5 Advanced Language Model with Real-Time Learning",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "dotenv": "^16.3.1",
+    "node-fetch": "^3.3.2",
+    "cheerio": "^1.0.0-rc.12"
+  },
+  "keywords": ["telegram", "bot", "ai", "d5", "chai-emet", "learning"],
+  "author": "TNTF (Nathaniel Nissim)",
+  "license": "MIT"
+}
