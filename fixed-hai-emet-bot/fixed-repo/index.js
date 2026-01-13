@@ -813,7 +813,22 @@ class UserEngineManager {
 // ==========================================
 // INIT SYSTEMS
 // ==========================================
-
+class WebSearchEngine {
+  async search(query) {
+    try {
+      const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data.RelatedTopics.slice(0, 10).map((t, i) => ({
+        index: i + 1,
+        title: t.Text ? t.Text.substring(0, 60) + "..." : "תוצאה",
+        link: t.FirstURL
+      }));
+    } catch (err) { return []; }
+  }
+}
+const searchEngine = new WebSearchEngine();
+const SEARCH_RESULTS = new Map();
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GAS_URL = process.env.hai_emet_ultimate_complete_gs;
 const GAS_SECRET = process.env.HAI_EMET_GAS_SECRET || 'HAI-EMET-:D5::TNTF::2026::SECURE';
@@ -822,7 +837,22 @@ if (!BOT_TOKEN) {
   console.error('❌ BOT_TOKEN missing');
   process.exit(1);
 }
-
+class WebSearchEngine {
+  async search(query) {
+    try {
+      const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json`;
+      const res = await fetch(url);
+      const data = await res.json();
+      return data.RelatedTopics.slice(0, 10).map((t, i) => ({
+        index: i + 1,
+        title: t.Text ? t.Text.substring(0, 60) + "..." : "תוצאה",
+        link: t.FirstURL
+      }));
+    } catch (err) { return []; }
+  }
+}
+const searchEngine = new WebSearchEngine();
+const SEARCH_RESULTS = new Map();
 const bot = new TelegramBot(BOT_TOKEN, { polling: true });
 const dc = new DataCollector(GAS_URL, GAS_SECRET);
 const het = new HETSystem(dc);
@@ -865,7 +895,7 @@ function getMainMenu() {
 function getEngineMenu(type) {
   const engines = router.getAvailableEngines(type);
   const buttons = engines.map(eng => {
-    const costText = eng.free ? 'חינמי' : `$${eng.cost}`;
+    const costText = eng.free ? 'מומלץ' : `$${eng.cost}`;
     const icon = eng.userAdded ? '👤' : '';
     return [{ text: `${icon}${eng.name} (${costText})`, callback_data: `engine_${type}_${eng.key}` }];
   });
